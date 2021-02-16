@@ -25,7 +25,7 @@ class TransformCanvas(tk.Canvas):
     when the canvas gets resized or any of the parameters influencing the visualization (e.g. scaling) gets changed.
 
     To draw without any transformation (i.e. in pixels like normal) use the base canvas (see base property) and set
-    the keyword no_trans=True when using create*().
+    the keyword no_trans=True when using create_*().
     Example: self._canvas.base.create_line(x1[0], x1[1], x2[0], x2[1], dash=(3, 5), no_trans=True)
 
     If no rotation is used (which tk.Canvas does not support natively) the widgets can remain in place and manipulated
@@ -44,7 +44,7 @@ class TransformCanvas(tk.Canvas):
     master : tk.Misc
         The parent widget.
     scale_base : float, default 1.
-        Base scale factor for all objects based to the origin. A value of 1. means the original size.
+        Scaling base factor for all objects based to the origin. A value of 1. means the original size.
     scale_ratio : float, optional
         Defines the scale ratio (= width / height) that forces the view to keep this ratio
         when adjusting the content to its area.
@@ -99,8 +99,8 @@ class TransformCanvas(tk.Canvas):
         self.zoom_factor = zoom_factor
         self.direction = direction
         self.origin = origin
-        self._offset = np.asarray(offset, dtype=np.float64)
-        self._rotation = rotation
+        self.offset = offset
+        self.rotation = rotation
 
         # Useful for temporarily omit automatic drawing
         # (e.g. when doing multiple settings and only draw once at the end)
@@ -210,14 +210,7 @@ class TransformCanvas(tk.Canvas):
             The scale ratio.
         """
 
-        ratio = 1.
-
-        if self._scale_ratio:
-            canvas_ratio = self.width / self.height
-            ratio *= self._scale_ratio / canvas_ratio
-        # end if
-
-        return ratio
+        return self._scale_ratio
     # end def
 
     @scale_ratio.setter
@@ -235,12 +228,31 @@ class TransformCanvas(tk.Canvas):
             The scale ratio.
         """
 
-        if value and value <= 0.:
-            raise ValueError(f"The value ({value}) for scale_ratio needs to be >0.")
+        if value is not None and value <= 0.:
+            raise ValueError(f"The value ({value}) for scale_ratio needs to be > 0.")
         # end if
 
         self._scale_ratio = value
         self.update()
+    # end def
+
+    def calc_scale_ratio_effective(self) -> float:
+        """Returns the effective.
+
+        Returns
+        -------
+        scale_ratio_effective : float
+            The scale ratio.
+        """
+
+        ratio = 1.
+
+        if self._scale_ratio:
+            canvas_ratio = self.width / self.height
+            ratio *= self._scale_ratio / canvas_ratio
+        # end if
+
+        return ratio
     # end def
 
     @property
@@ -301,6 +313,10 @@ class TransformCanvas(tk.Canvas):
             The zoom value.
         """
 
+        if value == 0.:
+            raise ValueError(f"The value ({value}) for zoom needs to be != 0 (and usually > 0).")
+        # end if
+
         self._zoom_value = value
         self.update()
     # end def
@@ -314,7 +330,7 @@ class TransformCanvas(tk.Canvas):
         Returns
         -------
         direction : str
-            The direction string of the canvas.
+            The direction string of the canvas. Possible values are tk.NE, tk.SE, tk.SW and tk.NW.
         """
 
         return self._direction
@@ -330,8 +346,14 @@ class TransformCanvas(tk.Canvas):
         Parameters
         ----------
         value : str
-            The direction string of the canvas.
+            The direction string of the canvas. Allowed values are tk.NE, tk.SE, tk.SW and tk.NW.
         """
+
+        allowed_values = (tk.NE, tk.SE, tk.SW, tk.NW)
+
+        if value not in allowed_values:
+            raise ValueError(f"The value ({value}) for direction needs to be in {allowed_values}.")
+        # end if
 
         self._get_direction_vector(value)  # Test the validity of the direction string
         self._direction = value
@@ -341,12 +363,12 @@ class TransformCanvas(tk.Canvas):
     @property
     def origin(self) -> str:
         """Returns the origin string of the canvas. A value of tk.NE e.g. means the top left corner (0, 0).
-        Allowed values are tk.N, tk, NE, tk.E, tk.SE, tk.S, tk.SW, tk.W, tk.NW and tk.CENTER.
 
         Returns
         -------
         origin : str
             The origin string of the canvas.
+            Possible values are tk.N, tk.NE, tk.E, tk.SE, tk.S, tk.SW, tk.W, tk.NW and tk.CENTER.
         """
 
         return self._origin
@@ -355,14 +377,19 @@ class TransformCanvas(tk.Canvas):
     @origin.setter
     def origin(self, value: str) -> None:
         """Sets the origin string of the canvas. A value of tk.NE e.g. means the top left corner (0, 0).
-        Allowed values are tk.N, tk, NE, tk.E, tk.SE, tk.S, tk.SW, tk.W, tk.NW and tk.CENTER.
         If omit_draw is False, the drawing callback functions gets called.
 
         Parameters
         ----------
         value : str
             The origin string of the canvas.
+            Allowed values are tk.N, tk.NE, tk.E, tk.SE, tk.S, tk.SW, tk.W, tk.NW and tk.CENTER.
         """
+        allowed_values = (tk.N, tk.NE, tk.E, tk.SE, tk.S, tk.SW, tk.W, tk.NW, tk.CENTER)
+
+        if value not in allowed_values:
+            raise ValueError(f"The value ({value}) for origin needs to be in {allowed_values}.")
+        # end if
 
         self._get_origin_vector(value)  # Test the validity of the origin string
         self._origin = value
@@ -394,8 +421,8 @@ class TransformCanvas(tk.Canvas):
             The global translation offset.
         """
 
-        x = value[0] if value[0] else self._offset[0]
-        y = value[1] if value[1] else self._offset[1]
+        x = value[0] if value[0] is not None else self._offset[0]
+        y = value[1] if value[1] is not None else self._offset[1]
 
         self._offset = np.asarray((x, y), dtype=np.float64)
         self.update()
@@ -469,6 +496,26 @@ class TransformCanvas(tk.Canvas):
         """
 
         return self._transformation_matrix
+    # end def
+
+    @transformation_matrix.setter
+    def transformation_matrix(self, value: np.ndarray) -> None:
+        """Sets the global transformation matrix.
+        Note that this matrix is just temporarily and gets overwritten if any of the values it depends on changes.
+        Also are the values that the transformation matrix depends on not updated!
+
+        Parameters
+        ----------
+        value : np.ndarray
+            The global transformation matrix.
+        """
+
+        if not (isinstance(value, np.ndarray) and value.shape == (3, 3)):
+            raise ValueError(f"The value ({value}) for transformation matrix needs to be a np.ndarray of share (3, 3).")
+        # end if
+
+        self._transformation_matrix = value
+        self.update(update_transformation_matrix=False)
     # end def
 
     @property
@@ -587,9 +634,13 @@ class TransformCanvas(tk.Canvas):
 
             # Global transformation
             args = self.transform_coords(args)
+
+            return super().create_line(*args, no_trans=True, **kwargs)
+
+        else:
+            return super().create_line(*args, **kwargs)
         # end if
 
-        return super().create_line(*args, **kwargs)
     # end def
 
     def create_oval(self, *args, n_segments: Optional[int] = 100, transformation_matrix: Optional[np.ndarray] = None, **kwargs):
@@ -627,6 +678,7 @@ class TransformCanvas(tk.Canvas):
             for i in range(0, n_segments):
                 _theta = 2 * math.pi * i / n_segments
                 if r1 != r2:
+                    # Sqrt only roughly approximates the distribution of the angles
                     phi = math.atan(math.tan(_theta) * math.sqrt(r2 / r1))
                     phi += math.pi * int(np.cos(_theta) < 0)  # Compensate for atan (instead of atan2)
                 else:
@@ -649,7 +701,7 @@ class TransformCanvas(tk.Canvas):
             # Global transformation
             args = self.transform_coords(args)
 
-            return super().create_polygon(*args, **kwargs)
+            return super().create_polygon(*args, no_trans=True, **kwargs)
 
         else:
             return super().create_oval(*args, **kwargs)
@@ -682,9 +734,12 @@ class TransformCanvas(tk.Canvas):
 
             # Global transformation
             args = self.transform_coords(args)
-        # end if
 
-        return super().create_polygon(*args, **kwargs)
+            return super().create_polygon(*args, no_trans=True, **kwargs)
+
+        else:
+            return super().create_polygon(*args, **kwargs)
+        # end if
     # end def
 
     def create_rectangle(self, *args, transformation_matrix: Optional[np.ndarray] = None, **kwargs):
@@ -721,7 +776,7 @@ class TransformCanvas(tk.Canvas):
             # Global transformation
             args = self.transform_coords(args)
 
-            return super().create_polygon(*args, **kwargs)
+            return super().create_polygon(*args, no_trans=True, **kwargs)
 
         else:
             return super().create_rectangle(*args, **kwargs)
@@ -837,12 +892,22 @@ class TransformCanvas(tk.Canvas):
         self._zoom(TransformCanvas.ZoomDir.OUT)
     # end def
 
-    def update(self):
-        """Updates the transformation matrix and draws the transformed scene to the canvas."""
+    def update(self, update_transformation_matrix: bool = True):
+        """Updates the transformation matrix and draws the transformed scene to the canvas.
+
+        Parameters
+        ----------
+        update_transformation_matrix : bool
+            Indicates of the transformation matrix shall be recalculated.
+            Useful to suppress the recalculation if the matrix is set directly just before.
+        """
 
         if self._is_init:
             self._update_canvas_dimensions()
-            self._update_transformation_matrix()
+
+            if update_transformation_matrix:
+                self._update_transformation_matrix()
+            # end if
 
             if self._cb_draw and not self._omit_draw:
                 self._cb_draw()
@@ -905,7 +970,7 @@ class TransformCanvas(tk.Canvas):
         ----------
         origin : str
             Origin of the canvas. A value of tk.NE e.g. means the top left corner (0, 0).
-            Allowed values are tk.N, tk, NE, tk.E, tk.SE, tk.S,
+            Allowed values are tk.N, tk.NE, tk.E, tk.SE, tk.S,
             tk.SW, tk.W, tk.NW and tk.CENTER.
 
         Returns
@@ -1008,8 +1073,17 @@ class TransformCanvas(tk.Canvas):
         self.omit_draw = True
 
         # Zoom
-        zoom_factor_update = self._zoom_factor if zoom_dir is TransformCanvas.ZoomDir.IN else 1. / self._zoom_factor
+        zoom_factor = self._zoom_factor
+
+        # Inverse zoom factor and direction if zoom factor < 1
+        if self._zoom_factor < 1:
+            zoom_factor = 1 / zoom_factor
+            zoom_dir = TransformCanvas.ZoomDir.IN if zoom_dir is TransformCanvas.ZoomDir.OUT else TransformCanvas.ZoomDir.OUT
+        # end if
+
+        zoom_factor_update = zoom_factor if zoom_dir is TransformCanvas.ZoomDir.IN else 1. / zoom_factor
         self.zoom *= zoom_factor_update
+
         zoom_factor_diff = abs(zoom_factor_update - 1)
 
         # Zoom center around the canvas origin if cursor is outside of the canvas.
@@ -1022,11 +1096,10 @@ class TransformCanvas(tk.Canvas):
         # end if
 
         pointer = np.asarray([pointer_x, pointer_y], dtype=np.float64)
-        origin = self._get_origin_vector(self._origin)
 
         # Adapt the offset
         _zoom_dir = -1. if zoom_dir is TransformCanvas.ZoomDir.IN else 1.
-        self.offset += (pointer - (self._offset + origin)) * zoom_factor_diff * _zoom_dir
+        self.offset += (pointer - self._v_translate()) * zoom_factor_diff * _zoom_dir
 
         self._omit_draw = False
         self.update()
@@ -1047,7 +1120,7 @@ class TransformCanvas(tk.Canvas):
         v *= self.scale_base
 
         # Scale ratio
-        v *= self.scale_ratio
+        v *= self.calc_scale_ratio_effective()
 
         # Zoom
         v *= self.zoom
