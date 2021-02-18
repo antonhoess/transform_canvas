@@ -39,6 +39,11 @@ class TransformCanvas(tk.Canvas):
     There are many functions that have a transformation_matrix argument. This matrix needs to be of shape (3, 3). The
     easiest way to create such a matrix is to use the Matrix class.
 
+    Following functions are not adapted and will be used in its original form:
+    * create_bitmap()
+    * create_image()
+    * create_window()
+
     Parameters
     ----------
     master : tk.Misc
@@ -597,7 +602,7 @@ class TransformCanvas(tk.Canvas):
 
     @property
     def base(self) -> tk.Canvas:
-        """Returns the underlying tk.Canvas. This allows for drawing without any transformation
+        """Returns the underlying tk.Canvas. This allows for drawing without any transformation.
 
         Returns
         -------
@@ -606,6 +611,153 @@ class TransformCanvas(tk.Canvas):
         """
 
         return super()
+    # end def
+
+    @staticmethod
+    def _get_pos_modulo_angle(angle: float, deg: bool = False, keep_full_angle: bool = False) -> float:
+        """Returns the given angle as positive angle within the range 0..2π.
+
+        Parameters
+        ----------
+        angle : float
+            The angle to convert.
+        deg: bool
+            Indicates if the input and output angles are treated as degrees instead of rad.
+        keep_full_angle : bool
+            Indicates if the value of 2π shall be kept as such of if it should be made to 0
+            (as it would be in modulo calculation, but which in some cases in inconvenient).
+
+        Returns
+        -------
+        conv_angle : float
+            The converted angle.
+        """
+
+        two_pi = 360. if deg else 2. * math.pi
+
+        if keep_full_angle and angle % two_pi == 0:
+            return two_pi
+        else:
+            angle = angle - two_pi * math.floor(angle / two_pi)
+
+            return angle
+        # end if
+    # end def
+
+    def create_arc(self, *args, n_segments: Optional[int] = 100, transformation_matrix: Optional[np.ndarray] = None, **kwargs):
+        """Create arc with coordinates x1, y1, x2, y2.
+        See tk.Canvas.create_arc() besides the additional functionality added (see below).
+        A main difference is that here the value of the parameter "extent" will be 360° if its value
+        is a (positive or negative) multiple of that (e.g. -720°). In tk.Canvas.create_arc() this will be 0°.
+
+        Parameters
+        ----------
+        n_segments : int, default 100
+            Number of line segments to approximate a full oval (360°) using a polygon.
+            For symmetric shapes this number should be divisible by 4 to produce a symmetric shape.
+        transformation_matrix : np.ndarray, default None
+            Local transformation matrix applied to the object before applying the global transformation matrix.
+        *args
+            List of arguments passed to tk.Canvas.create_arc.
+        **kwargs
+            Keyword arguments passed to tk.Canvas.create_arc.
+        """
+
+        # Check transformation matrix for validity
+        if transformation_matrix is not None:
+            self.transformation_matrix_is_valid(transformation_matrix)
+        # end if
+
+        if self._rotation != 0 or transformation_matrix is not None:
+            x1, y1, x2, y2 = args
+            r1 = (x2 - x1) / 2
+            r2 = (y2 - y1) / 2
+
+            # Start
+            start = 0
+            if "start" in kwargs:
+                start = kwargs.pop("start")
+
+            start = self._get_pos_modulo_angle(start, deg=True) / 180. * math.pi
+
+            # Extent
+            extent = 90
+            if "extent" in kwargs:
+                extent = kwargs.pop("extent")
+
+            extent = self._get_pos_modulo_angle(extent, deg=True, keep_full_angle=True) / 180. * math.pi
+
+            # Style
+            style = tk.PIESLICE
+            if "style" in kwargs:
+                style = kwargs.pop("style")
+            # end if
+
+            if extent == 2. * math.pi:
+                style = tk.CHORD
+            # end if
+
+            # Calculate some parameters for the outline points
+            step_size = 2 * math.pi / n_segments
+            # Don't use step_size to avoid rounding errors
+            n_segments = int(n_segments / (2 * math.pi) * extent)
+            # Preceding partial segment before the first complete segment
+            begin = (step_size - start % step_size) % step_size
+            end = (start + extent) % step_size  # Remaining partial segment after the last complete segment
+
+            # Recalculate the number of segments
+            angles = list()
+            if begin > 0:
+                angles.append(start)
+
+            angles += [start + begin + i * step_size for i in range(n_segments)]
+
+            if end > 0:
+                angles.append(start + extent)
+
+            # An ellipse is just a stretched circle, but the angles change when applying a ratio different from 1.
+            args = list()
+            for angle in angles:
+                args.append(math.cos(angle))
+                args.append(math.sin(angle))
+            # end for
+
+            if style is tk.PIESLICE:
+                args.append(0)
+                args.append(0)
+            # end if
+
+            args = self.transform_coords(args, matrix=Matrix().scale(x=r1, y=r2).translate(x=r1+x1, y=r2+y1))
+
+            # Local transformation
+            if transformation_matrix is not None:
+                args = self.transform_coords(args, matrix=transformation_matrix)
+
+            # Global transformation
+            args = self.transform_coords(args)
+
+            # Map kwargs (they have the same effect by use different names)
+            # Keyword argument "splinesteps" will not be adapted
+            kwargs["smooth"] = True
+
+            if style is tk.ARC:
+                self._remap_kw(kwargs, "activeoutline", "activefill")
+                self._remap_kw(kwargs, "activeoutlinestipple", "activestipple")
+                self._remap_kw(kwargs, "disabledoutline", "disabledfill")
+                self._remap_kw(kwargs, "disabledoutlinestipple", "disabledstipple")
+                self._remap_kw(kwargs, "outline", "fill")
+                self._remap_kw(kwargs, "outlineoffset", "offset")
+                self._remap_kw(kwargs, "outlinestipple", "stipple")
+
+                return super().create_line(*args, no_trans=True, **kwargs)
+
+            else:
+                return super().create_polygon(*args, no_trans=True, **kwargs)
+            # end if
+
+        else:
+            return super().create_arc(*args, **kwargs)
+        # end if
     # end def
 
     def create_line(self, *args, transformation_matrix: Optional[np.ndarray] = None, **kwargs):
@@ -660,52 +812,13 @@ class TransformCanvas(tk.Canvas):
             Keyword arguments passed to tk.Canvas.create_oval.
         """
 
-        # Check transformation matrix for validity
-        if transformation_matrix is not None:
-            self.transformation_matrix_is_valid(transformation_matrix)
-        # end if
+        kwargs["start"] = 0.
+        kwargs["extent"] = 360.
+        kwargs["style"] = tk.CHORD
 
-        if self._rotation != 0 or transformation_matrix is not None:
-            x1, y1, x2, y2 = args
-            r1 = (x2 - x1) / 2
-            r2 = (y2 - y1) / 2
-            center = x1 + r1, y1 + r2
+        x = self.create_arc(*args, n_segments=n_segments, transformation_matrix=transformation_matrix, **kwargs)
 
-            # Adapted from https://stackoverflow.com/questions/22694850/approximating-an-ellipse-with-a-polygon
-            # I've removed Nth point calculation, that involves indefinite Tan(Pi/2)
-            # It would better to assign known value 0 to Fi in this point
-            args = list()
-            for i in range(0, n_segments):
-                _theta = 2 * math.pi * i / n_segments
-                if r1 != r2:
-                    # Sqrt only roughly approximates the distribution of the angles
-                    phi = math.atan(math.tan(_theta) * math.sqrt(r2 / r1))
-                    phi += math.pi * int(np.cos(_theta) < 0)  # Compensate for atan (instead of atan2)
-                else:
-                    phi = _theta
-                # end if
-                _x = r1 * math.cos(phi)
-                _y = r2 * math.sin(phi)
-                args.append(_x)
-                args.append(_y)
-            # end for
-
-            # Local transformation
-            if transformation_matrix is not None:
-                args = self.transform_coords(args, matrix=Matrix().translate(*center))
-
-            # Local transformation
-            if transformation_matrix is not None:
-                args = self.transform_coords(args, matrix=transformation_matrix)
-
-            # Global transformation
-            args = self.transform_coords(args)
-
-            return super().create_polygon(*args, no_trans=True, **kwargs)
-
-        else:
-            return super().create_oval(*args, **kwargs)
-        # end if
+        return x
     # end def
 
     def create_polygon(self, *args, transformation_matrix: Optional[np.ndarray] = None, **kwargs):
@@ -1243,6 +1356,29 @@ class TransformCanvas(tk.Canvas):
         return p[:2]
     # end def
 
+    @staticmethod
+    def _remap_kw(kw, from_, to) -> None:
+        """Maps the value of a keyword argument to another name (and deletes the old one)
+
+        Parameters
+        ----------
+        kw : dict
+            Dictionary with keyword arguments to remap.
+        from_ : str
+            Old key (which will get deleted).
+        to : str
+            New key which will be created (or overwritten if already exists)
+            and which will get assigned the new value.
+        """
+
+        tmp = kw.get(from_)
+
+        if tmp is not None:
+            kw[to] = tmp
+            del kw[from_]
+        # end if
+    # end def
+
     def _create(self, item_type, args, kwargs) -> int:
         """Applies current transformations after using the tk.Canvas._create() function
         to transform the object's points.
@@ -1378,7 +1514,7 @@ class Matrix(np.ndarray):
         m[0, 2] = x
         m[1, 2] = y
 
-        return self @ m
+        return m @ self
     # end def
 
     def scale(self, x: float, y: float, origin: Optional[Tuple[float, float]] = None) -> Matrix:
@@ -1408,7 +1544,7 @@ class Matrix(np.ndarray):
             m = Matrix().translate(*origin) @ m @ Matrix().translate(*(-origin))
         # end if
 
-        return self @ m
+        return m @ self
     # end def
 
     def rotate(self, angle: float, origin: Optional[Tuple[float, float]] = None) -> Matrix:
@@ -1426,6 +1562,7 @@ class Matrix(np.ndarray):
         self: Matrix
             The Matrix itself after applying the scaling.
         """
+
         m = np.asarray([[np.cos(angle), -np.sin(angle), 0],
                         [np.sin(angle), np.cos(angle), 0],
                         [0, 0, 1]], dtype=np.float64)
@@ -1435,7 +1572,7 @@ class Matrix(np.ndarray):
             m = Matrix().translate(*origin) @ m @ Matrix().translate(*(-origin))
         # end if
 
-        return self @ m
+        return m @ self
     # end def
 
     def skew(self, angle_x: float = 0, angle_y: float = 0) -> Matrix:

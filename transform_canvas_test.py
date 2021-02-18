@@ -491,7 +491,7 @@ class TransformCanvasTest:
         # ... Canvas
         self._canvas = TransformCanvas(parent(), width=width, height=height, scale_base=2., scale_ratio=None,
                                        zoom_factor=1.1, direction=tk.NE, origin=tk.CENTER, offset=(150, -200),
-                                       rotation=0)#math.pi*2+.1)
+                                       rotation=math.pi*2+.0001)
         self._canvas.cb_draw = self._draw
         self._canvas.pack(expand=True, fill=tk.BOTH, side=tk.LEFT)
         self._canvas.bind('<Configure>', self._cb_configure)
@@ -669,26 +669,6 @@ class TransformCanvasTest:
 
         self._canvas.delete("all")
 
-        matrix = np.asarray(
-            [[2, 1, 0],
-             [0, 2, 0],
-             [0, 0, 2]])
-
-        matrix = Matrix().translate(5, 7).rotate(1 * math.pi)
-        matrix = Matrix().translate(25, 15).rotate(math.pi / 4).translate(-25, -15)
-        matrix = Matrix().translate(-25, -15)
-        matrix = Matrix().rotate(angle=math.pi / 4, origin=(25, 15))
-        matrix = Matrix().scale(5, 5, origin=(25, 15))
-        matrix = Matrix()
-        matrix = Matrix().skew(0, 30)
-        self._canvas.create_rectangle(10, 10, 40, 20, fill="light gray", outline="gray", transformation_matrix=matrix)
-        self._canvas.create_polygon(-10, -10, -15, 20, 10, -30, fill="red", outline="dark red")
-        self._canvas.create_oval(-10, -10, 200, 20, fill="black", outline="blue", transformation_matrix=Matrix().
-                                 rotate(angle=.1), n_segments=50)
-        self._canvas.create_line(0, 0, 20, 10, width=2, fill="blue")
-        self._canvas.create_line(0, 0, 20, 0)
-        self._canvas.create_text(50, 50, text="This is a rotation test", angle=10.)
-
         # Draw a coordinate system cross. Since there is no intersection in case the border line and the axis line
         # are parallel, the border lines need to be swapped at a certain point (see below).
 
@@ -731,6 +711,30 @@ class TransformCanvasTest:
         if x1 is not None and x2 is not None:  # This check is necessary in case the zoom is very very high
             self._canvas.base.create_line(x1[0], x1[1], x2[0], x2[1], dash=(3, 5), no_trans=True)
         # end if
+
+        # Draw some test objects
+        matrix = np.asarray(
+            [[2, 1, 0],
+             [0, 2, 0],
+             [0, 0, 2]])
+
+        matrix = Matrix().translate(5, 7).rotate(1 * math.pi)
+        matrix = Matrix().translate(25, 15).rotate(math.pi / 4).translate(-25, -15)
+        matrix = Matrix().translate(-25, -15)
+        matrix = Matrix().rotate(angle=math.pi / 4, origin=(25, 15))
+        matrix = Matrix().scale(5, 5, origin=(25, 15))
+        matrix = Matrix()
+        matrix = Matrix().skew(0, 30)
+        self._canvas.create_rectangle(10, 10, 40, 20, fill="light gray", outline="gray", transformation_matrix=matrix)
+        self._canvas.create_polygon(-10, -10, -15, 20, 10, -30, fill="red", outline="dark red")
+        self._canvas.create_oval(-10, -10, 200, 20, fill="black", outline="blue", transformation_matrix=Matrix().
+                                 rotate(angle=.1), n_segments=50)
+        self._canvas.create_line(0, 0, 20, 10, width=2, fill="blue")
+        self._canvas.create_line(0, 0, 20, 0)
+        self._canvas.create_text(50, 50, text="This is a rotation test", angle=10.)
+        self._canvas.base.create_arc(200, 200, 250, 300, dash=(3, 5), no_trans=True, start=90, extent=190, fill="lightgreen", style=tk.ARC)
+        self._canvas.create_arc(10, 10, 200, 100, dash=(3, 5), start=10, extent=290, fill="lightblue", outline="black", style=tk.CHORD, n_segments=112)
+        self._canvas.base.create_arc(10, 10, 200, 200, dash=(3, 5), start=10, extent=180, fill="lightblue", outline="black", style=tk.PIESLICE, no_trans=True)
     # end def
 
     def _do_zoom(self, zoom_dir: Optional[TransformCanvas.ZoomDir] = None):
