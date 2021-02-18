@@ -1,12 +1,11 @@
 GENERAL
 -------
 * Define TransformCanvasTest also as usable class. Adapt it for this purpose and outsource all individual code to a new class outside of it. Use parameters (e.g. (kwargs at create_line) for the cross hair or also the keys and mouse buttons for the transformation operations.
-* When zooming with the mouse and reaching e.g. the upper limit (10) then the canvas jumps in offset.
 
 
 MATRIX
 ------
-* Add a transformation_matrix argument to all tk.Canvas.create_* functionsas already done in some functions.
+* Add a transformation_matrix argument to all tk.Canvas.create_* functions as already done in some functions.
 * Use the same origin flags as e.g. in Matrix.scale(origin=) for the global transformation. Is it possible? Would this allow for using the initial mouse position at the rotation gesture as origin and rotate around this point? Or is it impossible since we need to save and continuously modify the transformation matrix?
 * Howto handle the problem that the origin of an object is in some corner, whereas often the center might be the desired place. Does it make sense to add an parameter like tk.NE, etc. as used in TransformCanvas.origin?
 * Check how to handle the transformation (only rotation) of create_text (which has a builtin angle parameter).

@@ -472,12 +472,12 @@ class TransformCanvasTest:
 
         # .../.../... Rotation angle scale
         self._var_rotation_angle = tk.DoubleVar()
-        self._scl_rotation_angle_from = -math.pi
-        self._scl_rotation_angle_to = math.pi
+        self._scl_rotation_angle_from = -180.
+        self._scl_rotation_angle_to = 180.
         self._scl_rotation_angle_neutral = 0.
         self._scl_rotation_angle = tk.Scale(parent(), orient=tk.HORIZONTAL, showvalue=False,
                                             from_=self._scl_rotation_angle_from, to=self._scl_rotation_angle_to,
-                                            resolution=0.000001, variable=self._var_rotation_angle,
+                                            resolution=0.0001, variable=self._var_rotation_angle,
                                             command=self._cb_scl_rotation_angle_tick)
         self._scl_rotation_angle.pack(expand=False, fill=tk.X, side=tk.TOP)
 
@@ -553,7 +553,7 @@ class TransformCanvasTest:
         self._var_direction_hor.set(self._canvas.direction[1])
 
         # Rotation
-        self._scl_rotation_angle.set(self._canvas.rotation)
+        self._scl_rotation_angle.set(self.rad2deg(self._canvas.rotation))
         self._cb_scl_rotation_angle_tick()
 
         self._canvas.omit_draw = omit_draw_ori
@@ -561,6 +561,42 @@ class TransformCanvasTest:
 
         # Main loop
         self._root.mainloop()
+    # end def
+
+    @staticmethod
+    def rad2deg(angle: float) -> float:
+        """Converts the given angle from radians to degrees.
+
+        Parameters
+        ----------
+        angle : float
+            Angle in radians.
+
+        Returns
+        -------
+        angle_deg : float
+            Angle in degrees.
+        """
+
+        return angle / math.pi * 180.
+    # end def
+
+    @staticmethod
+    def deg2rad(angle: float) -> float:
+        """Converts the given angle from degrees to radians.
+
+        Parameters
+        ----------
+        angle : float
+            Angle in degrees.
+
+        Returns
+        -------
+        angle_rad : float
+            Angle in radians.
+        """
+
+        return angle / 180. * math.pi
     # end def
 
     @staticmethod
@@ -753,7 +789,8 @@ class TransformCanvasTest:
         # end if
 
         self._var_zoom.set(self._canvas.zoom)
-        self._cb_scl_zoom_tick()
+        # Makes problems when zooming in more than the max. allowed (by the Scale widget's variable) zoom.
+        # self._cb_scl_zoom_tick()
     # end def
 
     def _do_move(self, direction: Optional[TransformCanvas.MoveDir] = None):
@@ -918,7 +955,7 @@ class TransformCanvasTest:
             rotation = -math.atan2((getattr(event, "y") - origin[1]), (getattr(event, "x") - origin[0]))
             self._canvas.rotation = (self._rotation_canvas + (rotation - self._rotation)) % (2 * math.pi)
 
-            self._var_rotation_angle.set(self._canvas.rotation)
+            self._var_rotation_angle.set(self.rad2deg(self._canvas.rotation))
             self._cb_scl_rotation_angle_tick()
         # end if
     # end def
@@ -1336,8 +1373,8 @@ class TransformCanvasTest:
             value = float(value_str)
 
             try:
-                self._canvas.rotation = value
-                self._var_rotation_angle.set(value)
+                self._canvas.rotation = self.deg2rad(value)
+                self._var_rotation_angle.set(self.deg2rad(value))
                 self._var_rotation_angle_text.set(value_str)
             except ValueError as e:
                 tkinter.messagebox.showerror(title="Invalid entry", message=e)
@@ -1366,7 +1403,7 @@ class TransformCanvasTest:
             self._ent_rotation_angle.insert(0, f"{self._var_rotation_angle.get():.6f}")
         # end if
 
-        self._canvas.rotation = self._var_rotation_angle.get()
+        self._canvas.rotation = self.deg2rad(self._var_rotation_angle.get())
         self._scl_rotation_angle.configure(
             troughcolor=self._get_color_by_value(value=self._scl_rotation_angle.get(),
                                                  min_value=self._scl_rotation_angle_from,
