@@ -553,7 +553,7 @@ class TransformCanvasTest:
         self._var_direction_hor.set(self._canvas.direction[1])
 
         # Rotation
-        self._scl_rotation_angle.set(self.rad2deg(self._canvas.rotation))
+        self._scl_rotation_angle.set(TransformCanvas.rad2deg(self._canvas.rotation))
         self._cb_scl_rotation_angle_tick()
 
         self._canvas.omit_draw = omit_draw_ori
@@ -561,42 +561,6 @@ class TransformCanvasTest:
 
         # Main loop
         self._root.mainloop()
-    # end def
-
-    @staticmethod
-    def rad2deg(angle: float) -> float:
-        """Converts the given angle from radians to degrees.
-
-        Parameters
-        ----------
-        angle : float
-            Angle in radians.
-
-        Returns
-        -------
-        angle_deg : float
-            Angle in degrees.
-        """
-
-        return angle / math.pi * 180.
-    # end def
-
-    @staticmethod
-    def deg2rad(angle: float) -> float:
-        """Converts the given angle from degrees to radians.
-
-        Parameters
-        ----------
-        angle : float
-            Angle in degrees.
-
-        Returns
-        -------
-        angle_rad : float
-            Angle in radians.
-        """
-
-        return angle / 180. * math.pi
     # end def
 
     @staticmethod
@@ -767,9 +731,9 @@ class TransformCanvasTest:
                                  rotate(angle=.1), n_segments=50)
         self._canvas.create_line(0, 0, 20, 10, width=2, fill="blue")
         self._canvas.create_line(0, 0, 20, 0)
-        self._canvas.create_text(50, 50, text="This is a rotation test", angle=10.)
+        self._canvas.create_text(50, 50, text="This is a rotation test", font=('Arial', 8, 'bold'), angle=10., scale_font_size=False, anchor=tk.NW)
+        self._canvas.create_arc(-200, -250, 0, 0, dash=(3, 5), start=10, extent=290, fill="lightblue", outline="black", style=tk.CHORD, n_segments=112)
         self._canvas.base.create_arc(200, 200, 250, 300, dash=(3, 5), no_trans=True, start=90, extent=190, fill="lightgreen", style=tk.ARC)
-        self._canvas.create_arc(10, 10, 200, 100, dash=(3, 5), start=10, extent=290, fill="lightblue", outline="black", style=tk.CHORD, n_segments=112)
         self._canvas.base.create_arc(10, 10, 200, 200, dash=(3, 5), start=10, extent=180, fill="lightblue", outline="black", style=tk.PIESLICE, no_trans=True)
     # end def
 
@@ -955,7 +919,7 @@ class TransformCanvasTest:
             rotation = -math.atan2((getattr(event, "y") - origin[1]), (getattr(event, "x") - origin[0]))
             self._canvas.rotation = (self._rotation_canvas + (rotation - self._rotation)) % (2 * math.pi)
 
-            self._var_rotation_angle.set(self.rad2deg(self._canvas.rotation))
+            self._var_rotation_angle.set(TransformCanvas.rad2deg(self._canvas.rotation))
             self._cb_scl_rotation_angle_tick()
         # end if
     # end def
@@ -1373,8 +1337,8 @@ class TransformCanvasTest:
             value = float(value_str)
 
             try:
-                self._canvas.rotation = self.deg2rad(value)
-                self._var_rotation_angle.set(self.deg2rad(value))
+                self._canvas.rotation = TransformCanvas.deg2rad(value)
+                self._var_rotation_angle.set(TransformCanvas.deg2rad(value))
                 self._var_rotation_angle_text.set(value_str)
             except ValueError as e:
                 tkinter.messagebox.showerror(title="Invalid entry", message=e)
@@ -1403,7 +1367,7 @@ class TransformCanvasTest:
             self._ent_rotation_angle.insert(0, f"{self._var_rotation_angle.get():.6f}")
         # end if
 
-        self._canvas.rotation = self.deg2rad(self._var_rotation_angle.get())
+        self._canvas.rotation = TransformCanvas.deg2rad(self._var_rotation_angle.get())
         self._scl_rotation_angle.configure(
             troughcolor=self._get_color_by_value(value=self._scl_rotation_angle.get(),
                                                  min_value=self._scl_rotation_angle_from,

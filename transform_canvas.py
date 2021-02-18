@@ -896,26 +896,68 @@ class TransformCanvas(tk.Canvas):
         # end if
     # end def
 
-    def create_text(self, *args, **kwargs):
+    def create_text(self, *args, scale_font_size: bool = True, transformation_matrix: Optional[np.ndarray] = None, **kwargs):
         """Create text with coordinates x1, y1.
         See tk.Canvas.create_text() besides the additional functionality added (see below).
+
+        Parameters
+        ----------
+        transformation_matrix : np.ndarray, default None
+            Local transformation matrix applied to the object before applying the global transformation matrix.
+            In this case (text) this only changes its position. The text itself cannot be transformed on any other way.
+            The keyword "angle" needs to be set (in addition) to rotate the text.
+        scale_font_size : bool, default True
+            Indicates if the text shall be scaled based on the TransformCanvas' total scale factor
+            or if it should be fixed.
+        *args
+            List of arguments passed to tk.Canvas.create_oval.
+        **kwargs
+            Keyword arguments passed to tk.Canvas.create_oval.
         """
 
-        if self._rotation != 0:
+        # Check transformation matrix for validity
+        if transformation_matrix is not None:
+            self.transformation_matrix_is_valid(transformation_matrix)
+        # end if
+
+        if self._rotation != 0 or transformation_matrix is not None:
             angle = 0
             if "angle" in kwargs:
                 angle = kwargs["angle"]
             # end if
 
-            angle += self.rotation / math.pi * 180.
+            angle += self.rad2deg(self.rotation)
             kwargs["angle"] = angle
+
+            # Local transformation
+            if transformation_matrix is not None:
+                args = self.transform_coords(args, matrix=transformation_matrix)
 
             # Global transformation
             args = self.transform_coords(args)
-        # end if
 
-        return super().create_text(*args, **kwargs)
-    # end def
+            x = super().create_text(*args, **kwargs)
+
+            # Scale font size. Since the size is not necessarily known in advance (except it was set in kwargs),
+            # it needs to be read after the text's creation and changed.
+            # Maybe there's a way to get the default font in advance,
+            # but that's way more complicated as the arguments need to be incorporated, too.
+            # Example code: tkfont.Font(name="TkDefaultFont", exists=True, root=self).actual()["size"]
+            if scale_font_size:
+                font = self.itemcget(x, 'font').split()
+                if len(font) >= 2:
+                    size = self._v_scale()
+                    size = max(abs(size[0]), abs(size[1]))
+                    font[1] = str(round(float(font[1]) * size))
+                    self.itemconfigure(x, font=" ".join(font))
+                # end if
+            # end if
+
+            return x
+
+        else:
+            return super().create_text(*args, **kwargs)
+        # end def
 
     @staticmethod
     def transformation_matrix_is_valid(transformation_matrix: np.ndarray) -> None:
@@ -1003,6 +1045,42 @@ class TransformCanvas(tk.Canvas):
         center of the canvas if the cursor is outside the canvas."""
 
         self._zoom(TransformCanvas.ZoomDir.OUT)
+    # end def
+
+    @staticmethod
+    def rad2deg(angle: float) -> float:
+        """Converts the given angle from radians to degrees.
+
+        Parameters
+        ----------
+        angle : float
+            Angle in radians.
+
+        Returns
+        -------
+        angle_deg : float
+            Angle in degrees.
+        """
+
+        return angle / math.pi * 180.
+    # end def
+
+    @staticmethod
+    def deg2rad(angle: float) -> float:
+        """Converts the given angle from degrees to radians.
+
+        Parameters
+        ----------
+        angle : float
+            Angle in degrees.
+
+        Returns
+        -------
+        angle_rad : float
+            Angle in radians.
+        """
+
+        return angle / 180. * math.pi
     # end def
 
     def update(self, update_transformation_matrix: bool = True):
