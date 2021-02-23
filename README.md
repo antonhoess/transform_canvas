@@ -10,6 +10,7 @@ conda init bash # => Open new terminal
 conda create --name transform_canvas python=3.8  # Uses the np.ndarray @ operator (since 3.5)
 conda install --name transform_canvas numpy
 conda install --name transform_canvas tk
+conda install --name transform_canvas pillow
 ```
 
 ### Activate the conda environment and start the program
@@ -25,6 +26,9 @@ conda activate transform_canvas
 
 ### Test GUI with all possible values and settings of the TransformCanvas
 ![TransformCanvas Test GUI](images/test_scenario_2.png "TransformCanvas Test GUI")
+
+### Example with rotated objects including rotated arcs and images (which are the most complex elements of tkinter).
+![TransformCanvas with Rotated Image](images/test_scenario_3.png "TransformCanvas with Rotated Image")
 
 ## How to use the program
 First, the example TransformCanvasTest in transform_canvas_test.py can be altered to change the

@@ -4,6 +4,9 @@ from enum import Enum
 import numpy as np
 import math
 import tkinter as tk
+import threading
+import time
+from PIL import Image, ImageTk
 
 """This tk.Canvas derived class allows to transform the entire scene using translation, scaling and rotation."""
 
@@ -25,8 +28,8 @@ class TransformCanvas(tk.Canvas):
     when the canvas gets resized or any of the parameters influencing the visualization (e.g. scaling) gets changed.
 
     To draw without any transformation (i.e. in pixels like normal) use the base canvas (see base property) and set
-    the keyword no_trans=True when using create_*().
-    Example: self._canvas.base.create_line(x1[0], x1[1], x2[0], x2[1], dash=(3, 5), no_trans=True)
+    the keyword trans=False when using create_*().
+    Example: self._canvas.base.create_line(x1[0], x1[1], x2[0], x2[1], dash=(3, 5), trans=False)
 
     If no rotation is used (which tk.Canvas does not support natively) the widgets can remain in place and manipulated
     in the drawing callback instead of deleting all of them before redrawing all anew. But if rotation is set,
@@ -65,6 +68,12 @@ class TransformCanvas(tk.Canvas):
         tk.SW, tk.W, tk.NW and tk.CENTER.
     offset : (int, int), default (0, 0)
         Offset in x- and y-direction in pixels. Useful to move the view in pixel coordinates.
+    rotation : float, default 0.
+        Rotation by angle [degrees] counterclockwise (= in the mathematical sense).
+    ignore_intermediate_updates : bool, default True
+        Indicates if the update function (which might call a very expensive drawing callback) shall only be called
+        again after the previous drawing has completed and reject all intermediate events.
+        If set to False, all events will get handled.
     *args
         List of arguments passed to tk.Canvas.
     **kwargs
@@ -89,7 +98,8 @@ class TransformCanvas(tk.Canvas):
 
     def __init__(self, master: tk.Misc, scale_base: float = 1., scale_ratio: Optional[float] = None,
                  zoom_factor: float = 1.1, direction: str = tk.SE, origin: str = tk.CENTER,
-                 offset: Tuple[float, float] = (0., 0.), rotation: float = 0., *args, **kwargs):
+                 offset: Tuple[float, float] = (0., 0.), rotation: float = 0.,
+                 ignore_intermediate_updates: bool = False, *args, **kwargs) -> None:
         super().__init__(master, *args, **kwargs)
 
         # Prerequisite
@@ -97,6 +107,14 @@ class TransformCanvas(tk.Canvas):
         self._width = 0
         self._height = 0
         self._cb_draw = None
+
+        self._ignore_intermediate_updates = ignore_intermediate_updates
+        self._update_event = None
+        if self._ignore_intermediate_updates:
+            self._update_thread = threading.Thread(target=self._update_threaded)
+            self._update_thread.start()
+        # end if
+        self._tk_image_handles = list()
 
         # Save values - some values get set using their respective properties to use the checks built in there
         self.scale_base = scale_base
@@ -113,7 +131,7 @@ class TransformCanvas(tk.Canvas):
 
         self._zoom_value = 1.  # Initial zoom factor
         self._transformation_matrix = None
-        self._transformation_matrix_inv = None  # Store value to call the expensive matrix invsion only once
+        self._transformation_matrix_inv = None  # Store value to call the expensive matrix inversion only once
 
         # Private callbacks
         self._funcid_motion = None
@@ -613,38 +631,8 @@ class TransformCanvas(tk.Canvas):
         return super()
     # end def
 
-    @staticmethod
-    def _get_pos_modulo_angle(angle: float, deg: bool = False, keep_full_angle: bool = False) -> float:
-        """Returns the given angle as positive angle within the range 0..2π.
-
-        Parameters
-        ----------
-        angle : float
-            The angle to convert.
-        deg: bool
-            Indicates if the input and output angles are treated as degrees instead of rad.
-        keep_full_angle : bool
-            Indicates if the value of 2π shall be kept as such of if it should be made to 0
-            (as it would be in modulo calculation, but which in some cases in inconvenient).
-
-        Returns
-        -------
-        conv_angle : float
-            The converted angle.
-        """
-
-        two_pi = 360. if deg else 2. * math.pi
-
-        if keep_full_angle and angle % two_pi == 0:
-            return two_pi
-        else:
-            angle = angle - two_pi * math.floor(angle / two_pi)
-
-            return angle
-        # end if
-    # end def
-
-    def create_arc(self, *args, n_segments: Optional[int] = 100, transformation_matrix: Optional[np.ndarray] = None, **kwargs):
+    def create_arc(self, *args, n_segments: Optional[int] = 12, transformation_matrix: Optional[np.ndarray] = None,
+                   **kwargs) -> int:
         """Create arc with coordinates x1, y1, x2, y2.
         See tk.Canvas.create_arc() besides the additional functionality added (see below).
         A main difference is that here the value of the parameter "extent" will be 360° if its value
@@ -652,21 +640,22 @@ class TransformCanvas(tk.Canvas):
 
         Parameters
         ----------
-        n_segments : int, default 100
+        n_segments : int, default 12
             Number of line segments to approximate a full oval (360°) using a polygon.
             For symmetric shapes this number should be divisible by 4 to produce a symmetric shape.
         transformation_matrix : np.ndarray, default None
-            Local transformation matrix applied to the object before applying the global transformation matrix.
+            Local transformation matrix applied to the object's base coordinates
+            before applying the global transformation matrix.
         *args
             List of arguments passed to tk.Canvas.create_arc.
         **kwargs
             Keyword arguments passed to tk.Canvas.create_arc.
-        """
 
-        # Check transformation matrix for validity
-        if transformation_matrix is not None:
-            self.transformation_matrix_is_valid(transformation_matrix)
-        # end if
+        Returns
+        -------
+        object_id : int
+            The created objects ID.
+        """
 
         if self._rotation != 0 or transformation_matrix is not None:
             x1, y1, x2, y2 = args
@@ -729,9 +718,13 @@ class TransformCanvas(tk.Canvas):
 
             args = self.transform_coords(args, matrix=Matrix().scale(x=r1, y=r2).translate(x=r1+x1, y=r2+y1))
 
-            # Local transformation
             if transformation_matrix is not None:
+                # Check transformation matrix for validity
+                self.transformation_matrix_is_valid(transformation_matrix)
+
+                # Local transformation
                 args = self.transform_coords(args, matrix=transformation_matrix)
+            # end if
 
             # Global transformation
             args = self.transform_coords(args)
@@ -749,10 +742,10 @@ class TransformCanvas(tk.Canvas):
                 self._remap_kw(kwargs, "outlineoffset", "offset")
                 self._remap_kw(kwargs, "outlinestipple", "stipple")
 
-                return super().create_line(*args, no_trans=True, **kwargs)
+                return super().create_line(*args, trans=False, **kwargs)
 
             else:
-                return super().create_polygon(*args, no_trans=True, **kwargs)
+                return super().create_polygon(*args, trans=False, **kwargs)
             # end if
 
         else:
@@ -760,7 +753,101 @@ class TransformCanvas(tk.Canvas):
         # end if
     # end def
 
-    def create_line(self, *args, transformation_matrix: Optional[np.ndarray] = None, **kwargs):
+    def create_image(self, *args, transformation_matrix: Optional[np.ndarray] = None, local_scaling_factor: float = 1.,
+                     rotation_expand_fillcolor: Optional[str] = None, **kwargs) -> int:
+        """Create image with coordinates x1, y1.
+        See tk.Canvas.create_image() besides the additional functionality added (see below).
+
+        Parameters
+        ----------
+        transformation_matrix : np.ndarray, default None
+            Local transformation matrix applied to the object's base coordinates
+            before applying the global transformation matrix.
+        local_scaling_factor : float, default 1.
+            Scales the image by the given value before applying any other operation. Useful for images that don't have
+            the right size for a TransformCanvas' total scaling factor != 1.
+        rotation_expand_fillcolor : str, optional
+            When applying rotation to the image, the corners will not be filled with the image. This parameter defines
+            the corners to fill these corners. If not defined, the corners will be transparent (which will be the
+            desired choice in most cases).
+        *args
+            List of arguments passed to tk.Canvas.create_image.
+        **kwargs
+            Keyword arguments passed to tk.Canvas.create_image.
+            If the image provided in either "image", "activeimage" or "disabledimage" if of type PIL.ImageTk.PhotoImage
+            (as it is provided for tkinter.Canvas.create_image) it can only translated, but not scaled or even rotated.
+            If it is provided as PIL.Image.Image, all operations can take place, but then the image will get converted
+            internally to PIL.ImageTk.PhotoImage and a reference to it needs to be hold to prevent it from being
+            disposed by the garbage collector. So, when drawing the scene anew, first remove all old references to
+            calling TransformCanvas.clear_tk_image_handles.
+
+        Returns
+        -------
+        object_id : int
+            The created objects ID.
+        """
+
+        image_attributes = ("image", "activeimage", "disabledimage")
+        image_types = [type(x) for x in [kwargs.get(img_attr) for img_attr in image_attributes] if x is not None]
+
+        if len(set(image_types)) > 1:
+            raise ValueError(f"The type of each image parameter (in {image_attributes}) "
+                             f"needs to be of the same type but are of different types. "
+                             f"Type can be of either PIL.Image.Image/PIL.PngImagePlugin.PngImageFile or "
+                             f"PIL.ImageTk.PhotoImage.")
+        # end if
+
+        raw_image = image_types[0] is not ImageTk.PhotoImage
+
+        if raw_image:
+
+            # Scale - will be performed in any case
+            for image_attribute in image_attributes:
+                if image_attribute in kwargs:
+                    image = kwargs[image_attribute]
+                    image = image.convert("RGBA")
+
+                    # Scale
+                    sv = np.abs(self.scaling_vector * local_scaling_factor)
+                    if sv[0] != 1. or sv[1] != 1.:
+                        image = image.resize((int(image.size[0] * sv[0]), int(image.size[1] * sv[1])), Image.LANCZOS)
+                    # end if
+
+                    # Rotate
+                    if self.rotation != 0:
+                        image = image.rotate(self.rad2deg(self.rotation), expand=True,
+                                             fillcolor=rotation_expand_fillcolor)
+                    # end if
+
+                    # Convert to PhotoImage
+                    image = ImageTk.PhotoImage(image)
+                    self._tk_image_handles.append(image)
+                    # ->  Needs to get cleared by clear_tk_image_handles() to
+                    #     prevent keeping many unnecessary image handles
+
+                    # Store modified image back to kwargs
+                    kwargs[image_attribute] = image
+                # end if
+            # end for
+        # end if
+
+        if transformation_matrix is not None:
+            # Check transformation matrix for validity
+            self.transformation_matrix_is_valid(transformation_matrix)
+
+            # Local transformation
+            args = self.transform_coords(args, matrix=transformation_matrix)
+        # end if
+
+        # Global transformation
+        args = self.transform_coords(args)
+
+        # In this case (create_image) it makes more sense to handle everything in here since the tkinter.Canvas only
+        # can translate, but not scale (or even rotate) the images.
+        return super().create_image(*args, trans=False, **kwargs)
+    # end def
+
+    def create_line(self, *args, transformation_matrix: Optional[np.ndarray] = None, **kwargs) -> int:
         """Create line with coordinates x1, y1, ..., xn, yn.
         See tk.Canvas.create_line() besides the additional functionality added (see below).
 
@@ -772,44 +859,54 @@ class TransformCanvas(tk.Canvas):
             List of arguments passed to tk.Canvas.create_oval.
         **kwargs
             Keyword arguments passed to tk.Canvas.create_oval.
+
+        Returns
+        -------
+        object_id : int
+            The created objects ID.
         """
 
-        # Check transformation matrix for validity
-        if transformation_matrix is not None:
-            self.transformation_matrix_is_valid(transformation_matrix)
-        # end if
-
         if self._rotation != 0 or transformation_matrix is not None:
-            # Local transformation
             if transformation_matrix is not None:
+                # Check transformation matrix for validity
+                self.transformation_matrix_is_valid(transformation_matrix)
+
+                # Local transformation
                 args = self.transform_coords(args, matrix=transformation_matrix)
+            # end if
 
             # Global transformation
             args = self.transform_coords(args)
 
-            return super().create_line(*args, no_trans=True, **kwargs)
+            return super().create_line(*args, trans=False, **kwargs)
 
         else:
             return super().create_line(*args, **kwargs)
         # end if
-
     # end def
 
-    def create_oval(self, *args, n_segments: Optional[int] = 100, transformation_matrix: Optional[np.ndarray] = None, **kwargs):
+    def create_oval(self, *args, n_segments: Optional[int] = 12, transformation_matrix: Optional[np.ndarray] = None,
+                    **kwargs) -> int:
         """Create oval with coordinates x1, y1, x2, y2.
         See tk.Canvas.create_oval() besides the additional functionality added (see below).
 
         Parameters
         ----------
-        n_segments : int, default 100
+        n_segments : int, default 12
             Number of line segments to approximate the oval using a polygon.
             For symmetric shapes this number should be divisible by 4 to produce a symmetric shape.
         transformation_matrix : np.ndarray, default None
-            Local transformation matrix applied to the object before applying the global transformation matrix.
+            Local transformation matrix applied to the object's base coordinates
+            before applying the global transformation matrix.
         *args
             List of arguments passed to tk.Canvas.create_oval.
         **kwargs
             Keyword arguments passed to tk.Canvas.create_oval.
+
+        Returns
+        -------
+        object_id : int
+            The created objects ID.
         """
 
         kwargs["start"] = 0.
@@ -821,7 +918,7 @@ class TransformCanvas(tk.Canvas):
         return x
     # end def
 
-    def create_polygon(self, *args, transformation_matrix: Optional[np.ndarray] = None, **kwargs):
+    def create_polygon(self, *args, transformation_matrix: Optional[np.ndarray] = None, **kwargs) -> int:
         """Create polygon with coordinates x1, y1, ..., xn, yn.
         See tk.Canvas.create_polygon() besides the additional functionality added (see below).
 
@@ -833,48 +930,54 @@ class TransformCanvas(tk.Canvas):
             List of arguments passed to tk.Canvas.create_oval.
         **kwargs
             Keyword arguments passed to tk.Canvas.create_oval.
+
+        Returns
+        -------
+        object_id : int
+            The created objects ID.
         """
 
-        # Check transformation matrix for validity
-        if transformation_matrix is not None:
-            self.transformation_matrix_is_valid(transformation_matrix)
-        # end if
-
         if self._rotation != 0 or transformation_matrix is not None:
-            # Local transformation
             if transformation_matrix is not None:
+                # Check transformation matrix for validity
+                self.transformation_matrix_is_valid(transformation_matrix)
+
+                # Local transformation
                 args = self.transform_coords(args, matrix=transformation_matrix)
+            # end if
 
             # Global transformation
             args = self.transform_coords(args)
 
-            return super().create_polygon(*args, no_trans=True, **kwargs)
+            return super().create_polygon(*args, trans=False, **kwargs)
 
         else:
             return super().create_polygon(*args, **kwargs)
         # end if
     # end def
 
-    def create_rectangle(self, *args, transformation_matrix: Optional[np.ndarray] = None, **kwargs):
+    def create_rectangle(self, *args, transformation_matrix: Optional[np.ndarray] = None, **kwargs) -> int:
         """Create rectangle with coordinates x1, y1, x2, y2.
         See tk.Canvas.create_rectangle() besides the additional functionality added (see below).
 
         Parameters
         ----------
         transformation_matrix : np.ndarray, default None
-            Local transformation matrix applied to the object before applying the global transformation matrix.
+            Local transformation matrix applied to the object's base coordinates
+            before applying the global transformation matrix.
         *args
             List of arguments passed to tk.Canvas.create_oval.
         **kwargs
             Keyword arguments passed to tk.Canvas.create_oval.
+
+        Returns
+        -------
+        object_id : int
+            The created objects ID.
         """
 
-        # Check transformation matrix for validity
-        if transformation_matrix is not None:
-            self.transformation_matrix_is_valid(transformation_matrix)
-        # end if
-
         if self._rotation != 0 or transformation_matrix is not None:
+
             p0 = args[:2]
             p1 = args[2:4]
             args = [p0[0], p0[1],
@@ -882,28 +985,33 @@ class TransformCanvas(tk.Canvas):
                     p1[0], p1[1],
                     p0[0], p1[1]]
 
-            # Local transformation
             if transformation_matrix is not None:
+                # Check transformation matrix for validity
+                self.transformation_matrix_is_valid(transformation_matrix)
+
+                # Local transformation
                 args = self.transform_coords(args, matrix=transformation_matrix)
+            # end if
 
             # Global transformation
             args = self.transform_coords(args)
 
-            return super().create_polygon(*args, no_trans=True, **kwargs)
+            return super().create_polygon(*args, trans=False, **kwargs)
 
         else:
             return super().create_rectangle(*args, **kwargs)
         # end if
     # end def
 
-    def create_text(self, *args, scale_font_size: bool = True, transformation_matrix: Optional[np.ndarray] = None, **kwargs):
+    def create_text(self, *args, scale_font_size: bool = True, transformation_matrix: Optional[np.ndarray] = None, **kwargs) -> int:
         """Create text with coordinates x1, y1.
         See tk.Canvas.create_text() besides the additional functionality added (see below).
 
         Parameters
         ----------
         transformation_matrix : np.ndarray, default None
-            Local transformation matrix applied to the object before applying the global transformation matrix.
+            Local transformation matrix applied to the object's base coordinates
+            before applying the global transformation matrix.
             In this case (text) this only changes its position. The text itself cannot be transformed on any other way.
             The keyword "angle" needs to be set (in addition) to rotate the text.
         scale_font_size : bool, default True
@@ -913,12 +1021,12 @@ class TransformCanvas(tk.Canvas):
             List of arguments passed to tk.Canvas.create_oval.
         **kwargs
             Keyword arguments passed to tk.Canvas.create_oval.
-        """
 
-        # Check transformation matrix for validity
-        if transformation_matrix is not None:
-            self.transformation_matrix_is_valid(transformation_matrix)
-        # end if
+        Returns
+        -------
+        object_id : int
+            The created objects ID.
+        """
 
         if self._rotation != 0 or transformation_matrix is not None:
             angle = 0
@@ -929,9 +1037,13 @@ class TransformCanvas(tk.Canvas):
             angle += self.rad2deg(self.rotation)
             kwargs["angle"] = angle
 
-            # Local transformation
             if transformation_matrix is not None:
+                # Check transformation matrix for validity
+                self.transformation_matrix_is_valid(transformation_matrix)
+
+                # Local transformation
                 args = self.transform_coords(args, matrix=transformation_matrix)
+            # end if
 
             # Global transformation
             args = self.transform_coords(args)
@@ -957,7 +1069,16 @@ class TransformCanvas(tk.Canvas):
 
         else:
             return super().create_text(*args, **kwargs)
-        # end def
+        # end if
+    # end def
+
+    def clear_tk_image_handles(self) -> None:
+        """Empties the list of image handles, which are necessary to keep their references preventing them from being
+        disposed by the garbage collector.
+        """
+
+        self._tk_image_handles.clear()
+    # end def
 
     @staticmethod
     def transformation_matrix_is_valid(transformation_matrix: np.ndarray) -> None:
@@ -1083,7 +1204,7 @@ class TransformCanvas(tk.Canvas):
         return angle / 180. * math.pi
     # end def
 
-    def update(self, update_transformation_matrix: bool = True):
+    def update(self, update_transformation_matrix: bool = True) -> None:
         """Updates the transformation matrix and draws the transformed scene to the canvas.
 
         Parameters
@@ -1093,20 +1214,14 @@ class TransformCanvas(tk.Canvas):
             Useful to suppress the recalculation if the matrix is set directly just before.
         """
 
-        if self._is_init:
-            self._update_canvas_dimensions()
-
-            if update_transformation_matrix:
-                self._update_transformation_matrix()
-            # end if
-
-            if self._cb_draw and not self._omit_draw:
-                self._cb_draw()
-            # end if
+        if self._ignore_intermediate_updates:
+            self._update_event = (update_transformation_matrix, )
+        else:
+            self._update_internal(update_transformation_matrix)
         # end if
     # end def
 
-    def bind_class(self, class_name, sequence=None, func=None, add=None):
+    def bind_class(self, class_name, sequence=None, func=None, add=None) -> any:
         """See tk.Canvas.bind_class() documentation.
         Also handles the private callbacks necessary for this class.
         """
@@ -1117,7 +1232,7 @@ class TransformCanvas(tk.Canvas):
         return funcid
     # end def
 
-    def unbind(self, sequence, funcid=None):
+    def unbind(self, sequence, funcid=None) -> None:
         """See tk.Canvas.unbind() documentation.
         Also handles the private callbacks necessary for this class.
         This is a fix, due to the still unfixed error in tkinter.Misc.unbind().
@@ -1136,7 +1251,7 @@ class TransformCanvas(tk.Canvas):
         self._rebind_private_cbs()
     # end def
 
-    def unbind_all(self, sequence):
+    def unbind_all(self, sequence) -> None:
         """See tk.Canvas.unbind_all() documentation.
         Also handles the private callbacks necessary for this class.
         """
@@ -1145,13 +1260,44 @@ class TransformCanvas(tk.Canvas):
         self._rebind_private_cbs()
     # end def
 
-    def unbind_class(self, class_name, sequence):
+    def unbind_class(self, class_name, sequence) -> None:
         """See tk.Canvas.unbind_class() documentation.
         Also handles the private callbacks necessary for this class.
         """
 
         super().unbind_class(class_name, sequence)
         self._rebind_private_cbs()
+    # end def
+
+    @staticmethod
+    def _get_pos_modulo_angle(angle: float, deg: bool = False, keep_full_angle: bool = False) -> float:
+        """Returns the given angle as positive angle within the range 0..2π.
+
+        Parameters
+        ----------
+        angle : float
+            The angle to convert.
+        deg: bool
+            Indicates if the input and output angles are treated as degrees instead of rad.
+        keep_full_angle : bool
+            Indicates if the value of 2π shall be kept as such of if it should be made to 0
+            (as it would be in modulo calculation, but which in some cases in inconvenient).
+
+        Returns
+        -------
+        conv_angle : float
+            The converted angle.
+        """
+
+        two_pi = 360. if deg else 2. * math.pi
+
+        if keep_full_angle and angle % two_pi == 0:
+            return two_pi
+        else:
+            angle = angle - two_pi * math.floor(angle / two_pi)
+
+            return angle
+        # end if
     # end def
 
     def _get_origin_vector(self, origin: str) -> np.ndarray:
@@ -1395,7 +1541,7 @@ class TransformCanvas(tk.Canvas):
         return m
     # end def
 
-    def _update_transformation_matrix(self):
+    def _update_transformation_matrix(self) -> None:
         """Recalculates the transformation matrix."""
 
         # The function is in reverse order due to the matrix calculation rules.
@@ -1474,7 +1620,7 @@ class TransformCanvas(tk.Canvas):
             The handle of the created object.
         """
 
-        trans = not kwargs.pop("no_trans", False)
+        trans = kwargs.pop("trans", True)
         x = super()._create(item_type, args, kwargs)
 
         # Don't apply transformation when explicitly disabled.
@@ -1489,7 +1635,7 @@ class TransformCanvas(tk.Canvas):
         return x
     # end def
 
-    def _rebind_private_cbs(self):
+    def _rebind_private_cbs(self) -> None:
         """Unbinds and bins anew the private event callbacks necessary."""
 
         if self._rebinding_private_cbs:
@@ -1505,7 +1651,50 @@ class TransformCanvas(tk.Canvas):
         self._rebinding_private_cbs = False
     # end def
 
-    def _bind(self, what, sequence, func, add, needcleanup=1):
+    def _update_threaded(self) -> None:
+        """Updates the transformation matrix and draws the transformed scene to the canvas.
+        Internal (threaded) function for update() that checks if there is a new drawing event.
+        """
+
+        # We don't e.g. a threading condition + notify(), since that way we might loose the last event
+        # as there is no trigger instance except the update() function itself.
+        # The only way seems to be looping and check the update event flag
+        while True:
+            if self._update_event:
+                update_transformation_matrix = self._update_event
+                self._update_event = None
+
+                self._update_internal(update_transformation_matrix)
+            # end if
+
+            time.sleep(.01)
+        # end while
+    # end if
+
+    def _update_internal(self, update_transformation_matrix: bool = True) -> None:
+        """Updates the transformation matrix and draws the transformed scene to the canvas.
+
+        Parameters
+        ----------
+        update_transformation_matrix : bool
+            Indicates of the transformation matrix shall be recalculated.
+            Useful to suppress the recalculation if the matrix is set directly just before.
+        """
+
+        if self._is_init:
+            self._update_canvas_dimensions()
+
+            if update_transformation_matrix:
+                self._update_transformation_matrix()
+            # end if
+
+            if self._cb_draw and not self._omit_draw:
+                self._cb_draw()
+            # end if
+        # end if
+    # end def
+
+    def _bind(self, what, sequence, func, add, needcleanup=1) -> any:
         """See tk.Canvas._bind() documentation.
         Also handles the private callbacks necessary for this class.
         """
@@ -1516,7 +1705,7 @@ class TransformCanvas(tk.Canvas):
         return funcid
     # end def
 
-    def _update_canvas_dimensions(self):
+    def _update_canvas_dimensions(self) -> None:
         """Updates the canvas' dimensions."""
 
         self._width = self.winfo_width()
@@ -1568,7 +1757,7 @@ class Matrix(np.ndarray):
     Matrix().translate(5, 7).rotate(math.pi).
     """
 
-    def __new__(cls):
+    def __new__(cls) -> Matrix:
         return np.eye(3, dtype=np.float64).view(cls)
     # end def
 

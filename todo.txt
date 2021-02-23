@@ -7,3 +7,13 @@ MATRIX
 ------
 * Use the same origin flags as e.g. in Matrix.scale(origin=) for the global transformation. Is it possible? Would this allow for using the initial mouse position at the rotation gesture as origin and rotate around this point? Or is it impossible since we need to save and continuously modify the transformation matrix?
 * Howto handle the problem that the origin of an object is in some corner, whereas often the center might be the desired place. Does it make sense to add an parameter like tk.NE, etc. as used in TransformCanvas.origin?
+
+
+KNOWN BUGS
+----------
+* When settings parameter ignore_intermediate_updates=True and e.g. rotate the canvas, sometimes images or even arcs might not be drawn. When moving the program windows or clicking on its title bar, the drawing is completed (with the correct, last values of rotation, etc.) Debugging has shown that the program hangs an different spots of the drawing callback.Most likely somewhere in the code where the images are drawn not not only there. Maybe the likelihood to freeze on a certain point depends on how long each operation takes to perform. But the true reason why it doesn't continue is unknown.
+
+
+Possibly another topic: Pixelwise image manipulation
+* https://pillow.readthedocs.io/en/stable/reference/ImageDraw.html
+* https://anzeljg.github.io/rin2/book2/2405/docs/tkinter/create_image.html

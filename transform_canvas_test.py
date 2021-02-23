@@ -3,6 +3,7 @@ import tkinter as tk
 import tkinter.messagebox
 import math
 import numpy as np
+from PIL import Image, ImageTk
 
 from transform_canvas import TransformCanvas, Matrix
 
@@ -73,6 +74,8 @@ class TransformCanvasTest:
         self._rotation = None
         self._rotation_canvas = None
         self._rotation_mode = False
+
+        self.tk_image_handles = list()  # Handles for the images to prevent them from being disposed by the GC
 
         parents = list()
 
@@ -491,7 +494,7 @@ class TransformCanvasTest:
         # ... Canvas
         self._canvas = TransformCanvas(parent(), width=width, height=height, scale_base=2., scale_ratio=None,
                                        zoom_factor=1.1, direction=tk.NE, origin=tk.CENTER, offset=(150, -200),
-                                       rotation=math.pi*2+.0001)
+                                       rotation=math.pi*2+.0001, ignore_intermediate_updates=False)
         self._canvas.cb_draw = self._draw
         self._canvas.pack(expand=True, fill=tk.BOTH, side=tk.LEFT)
         self._canvas.bind('<Configure>', self._cb_configure)
@@ -532,13 +535,23 @@ class TransformCanvasTest:
 
         # Scale ratio
         if self._canvas.scale_ratio is None:
-            self._scl_scale_ratio.set(1.)
+            self._var_scale_ratio.set(1.)
             self._cb_scl_scale_ratio_tick()  # Without this command, there will be no text in the disabled entry
             self._cb_chk_scale_ratio_toggle()
         else:
             self._scl_scale_ratio.set(self._canvas.scale_ratio)
             self._var_scale_ratio_chk.set(tk.TRUE)
         # end if
+
+        # # Scale ratio
+        # if self._canvas.scale_ratio is None:
+        #     self._scl_scale_ratio.set(1.)
+        #     self._cb_scl_scale_ratio_tick()  # Without this command, there will be no text in the disabled entry
+        #     self._cb_chk_scale_ratio_toggle()
+        # else:
+        #     self._scl_scale_ratio.set(self._canvas.scale_ratio)
+        #     self._var_scale_ratio_chk.set(tk.TRUE)
+        # # end if
 
         # Zoom factor
         self._scl_zoom_factor.set(self._canvas.zoom_factor)
@@ -698,7 +711,7 @@ class TransformCanvasTest:
                                  *right_border)
 
         if x1 is not None and x2 is not None:  # This check is necessary in case the zoom is very very high
-            self._canvas.base.create_line(x1[0], x1[1], x2[0], x2[1], dash=(5, 8), width=1, no_trans=True)
+            self._canvas.base.create_line(x1[0], x1[1], x2[0], x2[1], dash=(5, 8), width=1, trans=False)
         # end if
 
         # Calculate and draw y axis
@@ -709,7 +722,7 @@ class TransformCanvasTest:
                                  *bottom_border)
 
         if x1 is not None and x2 is not None:  # This check is necessary in case the zoom is very very high
-            self._canvas.base.create_line(x1[0], x1[1], x2[0], x2[1], dash=(3, 5), no_trans=True)
+            self._canvas.base.create_line(x1[0], x1[1], x2[0], x2[1], dash=(3, 5), trans=False)
         # end if
 
         # Draw some test objects
@@ -728,13 +741,46 @@ class TransformCanvasTest:
         self._canvas.create_rectangle(10, 10, 40, 20, fill="light gray", outline="gray", transformation_matrix=matrix)
         self._canvas.create_polygon(-10, -10, -15, 20, 10, -30, fill="red", outline="dark red")
         self._canvas.create_oval(-10, -10, 200, 20, fill="black", outline="blue", transformation_matrix=Matrix().
-                                 rotate(angle=.1), n_segments=50)
+                                 rotate(angle=.1), n_segments=8)
         self._canvas.create_line(0, 0, 20, 10, width=2, fill="blue")
         self._canvas.create_line(0, 0, 20, 0)
-        self._canvas.create_text(50, 50, text="This is a rotation test", font=('Arial', 8, 'bold'), angle=10., scale_font_size=False, anchor=tk.NW)
-        self._canvas.create_arc(-200, -250, 0, 0, dash=(3, 5), start=10, extent=290, fill="lightblue", outline="black", style=tk.CHORD, n_segments=112)
-        self._canvas.base.create_arc(200, 200, 250, 300, dash=(3, 5), no_trans=True, start=90, extent=190, fill="lightgreen", style=tk.ARC)
-        self._canvas.base.create_arc(10, 10, 200, 200, dash=(3, 5), start=10, extent=180, fill="lightblue", outline="black", style=tk.PIESLICE, no_trans=True)
+        self._canvas.create_text(50, 50, text="This is a rotation test", font=('Arial', 8, 'bold'), angle=10.,
+                                 scale_font_size=False, anchor=tk.NW)
+        self._canvas.create_arc(-200, -250, 0, 0, dash=(3, 5), start=10, extent=290, fill="light blue", outline="black",
+                                style=tk.CHORD, n_segments=12)
+        self._canvas.base.create_arc(200, 200, 250, 300, dash=(3, 5), trans=False, start=90, extent=190,
+                                     fill="light green", style=tk.ARC)
+        self._canvas.base.create_arc(10, 10, 200, 200, dash=(3, 5), start=10, extent=180, fill="light blue",
+                                     outline="black", style=tk.PIESLICE, trans=False)
+
+        # Images
+        # Since this drawing function will get called again and again the images will accumulate, but we don't need
+        # the old ones anymore
+        self.tk_image_handles.clear()
+        self._canvas.clear_tk_image_handles()
+
+        # Static image - (C) Webber (assumed, based on copyright claims), Creative Commons (Wikipedia)
+        image_fn = "test_images/pattern_test_webber_wikipedia_cc.jpg"
+        image = Image.open(image_fn)
+        image = ImageTk.PhotoImage(image)
+        # The handle is kept in this program space
+        self.tk_image_handles.append(image)
+        self._canvas.base.create_image(50, 500, image=image, trans=False)
+
+        # Transformed image - (C) Eukaryogurt, Creative Commons (Wikipedia)
+        image_fn = "test_images/wikipedia_transparent_logo_eukaryogurt_wikipedia_cc.png"
+        image = Image.open(image_fn)
+        # The handle is kept inside TransformCanvas
+        self._canvas.create_image(100, 100, image=image, local_scaling_factor=.05)
+
+        # Transformed image with reference kept in here
+        image_fn = "test_images/wikipedia_transparent_logo_eukaryogurt_wikipedia_cc.png"
+        image = Image.open(image_fn)
+        image = image.resize((int(image.size[0] * .01), int(image.size[1] * .01)), Image.LANCZOS)
+        image = ImageTk.PhotoImage(image)
+        self.tk_image_handles.append(image)
+        # The handle is kept here
+        self._canvas.create_image(-30, -30, image=image)
     # end def
 
     def _do_zoom(self, zoom_dir: Optional[TransformCanvas.ZoomDir] = None):
