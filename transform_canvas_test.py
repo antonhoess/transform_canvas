@@ -543,16 +543,6 @@ class TransformCanvasTest:
             self._var_scale_ratio_chk.set(tk.TRUE)
         # end if
 
-        # # Scale ratio
-        # if self._canvas.scale_ratio is None:
-        #     self._scl_scale_ratio.set(1.)
-        #     self._cb_scl_scale_ratio_tick()  # Without this command, there will be no text in the disabled entry
-        #     self._cb_chk_scale_ratio_toggle()
-        # else:
-        #     self._scl_scale_ratio.set(self._canvas.scale_ratio)
-        #     self._var_scale_ratio_chk.set(tk.TRUE)
-        # # end if
-
         # Zoom factor
         self._scl_zoom_factor.set(self._canvas.zoom_factor)
         self._cb_scl_zoom_factor_tick()
